@@ -9,7 +9,6 @@ project(goal_regist_server)
 ## is used, also find other catkin packages
 find_package(catkin REQUIRED COMPONENTS
   actionlib
-  move_base_msgs
   roscpp
   rospy
   std_msgs
@@ -107,10 +106,10 @@ find_package(catkin REQUIRED COMPONENTS
 ## CATKIN_DEPENDS: catkin_packages dependent projects also need
 ## DEPENDS: system dependencies of this project that dependent projects also need
 catkin_package(
-  INCLUDE_DIRS include
-  LIBRARIES goal_regist_server
-  CATKIN_DEPENDS actionlib move_base_msgs roscpp rospy std_msgs
-  DEPENDS system_lib
+#  INCLUDE_DIRS include
+#  LIBRARIES goal_regist_server
+  CATKIN_DEPENDS actionlib move_base_msgs roscpp rospy std_msgs message_runtime
+#  DEPENDS system_lib
 )
 
 ###########
