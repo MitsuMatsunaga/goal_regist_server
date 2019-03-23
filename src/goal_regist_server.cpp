@@ -1,14 +1,14 @@
 #include <ros/ros.h>
 #include <vector>
-#include <iostream>
 #include <stdio.h>
 #include <algorithm>
+#include <math.h>
 #include <goal_regist_server/goalRegist.h>
 #include <std_msgs/String.h>
 #include <geometry_msgs/PoseWithCovarianceStamped.h>
 #include <move_base_msgs/MoveBaseAction.h>   
 #include <actionlib/client/simple_action_client.h>   
-
+#include <nav_msgs/Odometry.h>
 typedef actionlib::SimpleActionClient<move_base_msgs::MoveBaseAction> MoveBaseClient;//MoveBaseクライアント
 /////////////////////////////////////////////////名前空間の宣言/////////////////////////////////////
 using namespace std;
@@ -22,21 +22,23 @@ typedef struct goalPoint{
 }goalPoint;
 ////////////////////////////////////////////////グローバル変数宣言/////////////////////////////////////
 vector<goalPoint> registedGP;//ゴール地点格納ベクタ
-move_base_msgs::MoveBaseGoal goal;//ゴール地点送信用変数   
+move_base_msgs::MoveBaseGoal goal;//ゴール地点送信用変数
+bool goal_protect;//ゴール指令値送信プロテクタ
+ geometry_msgs::Pose robot_pose;//オドメトリ結果取得用変数
 /////////////////////////////////プロトタイプ宣言///////////////////////////////////////////////////////
 bool registGoal(vector<goalPoint> &rgstGP,string goalname,float x,float y);   /*ゴール登録関数*/
 bool getGoal(vector<goalPoint> &rgstGP,string goalname,goalPoint* output);    /*ゴール情報引き出し関数*/
-bool goal_protect;
+
 ////////////////////////////////Subscriberコールバック関数//////////////////////////////////////////////
 //////////////////////////////////////ゴール地点登録用コールバック関数///////////////////////////////////
 void GoalRegistCB(const goal_regist_server::goalRegist msg){
 
-  registGoal(registedGP ,msg.GoalName,msg.x,msg.y);//ゴールベクタ登録関数に登録する関数
+  registGoal(registedGP ,msg.GoalName,robot_pose.position.x,robot_pose.position.y);//ゴールベクタ登録関数に登録する関数
 
 }
 //////////////////////////////////////////actionlib起動用コールバック関数///////////////////////////////
 void Go2PointCB(const std_msgs::String::ConstPtr& msg){
-  
+ //   float theta = 0.000;///移動方向にロボットが向く処理はまだ入れてない。(efqとqfeの処理を入れてない)
     goalPoint goal_point;
     if(getGoal(registedGP,msg->data,&goal_point)){//ゴールベクタから指定ゴール地点を取り出す関数
        printf("%s,(x,y)=(%1.4f,%1.4f)\n",goal_point.goalName.c_str(),goal_point.x,goal_point.y);
@@ -45,10 +47,25 @@ void Go2PointCB(const std_msgs::String::ConstPtr& msg){
     goal.target_pose.header.frame_id = "base_link"; //base_link座標系
     //goal.target_pose.header.frame_id = "base_footprint";//base_footprint座標系
     goal.target_pose.header.stamp = ros::Time::now();//現在時刻
-    goal.target_pose.pose.position.x = goal_point.x;
-    goal.target_pose.pose.position.y = goal_point.y;
+    goal.target_pose.pose.position.x = goal_point.x - robot_pose.position.x;
+    goal.target_pose.pose.position.y = goal_point.y - robot_pose.position.y;
+  //  theta = atan2(goal.target_pose.pose.position.x,goal.target_pose.pose.position.y);
+  //  goal.target_pose.pose.orientation.z = theta - robot_pose.orientation.z;
     goal.target_pose.pose.orientation.w = 1;
     goal_protect = true;//送信アクティブ
+
+}
+//////////////////////////////////////オドメトリ(amcl)用コールバック関数///////////////////////////////////
+//void odomCallback(const nav_msgs::Odometry &odom_msg){//オドメトリで取得する場合
+void odomCallback(const geometry_msgs::PoseWithCovarianceStamped &odom_msg){//amclで取得する場合
+	ROS_INFO("odom : x %lf  : y %lf\n", odom_msg.pose.pose.position.x, odom_msg.pose.pose.position.y); 
+	robot_pose.position.x   =  odom_msg.pose.pose.position.x;
+	robot_pose.position.y   =  odom_msg.pose.pose.position.x;
+	robot_pose.position.z   =  odom_msg.pose.pose.position.z;
+	robot_pose.orientation.x = odom_msg.pose.pose.orientation.x;
+	robot_pose.orientation.y = odom_msg.pose.pose.orientation.y;
+	robot_pose.orientation.z = odom_msg.pose.pose.orientation.z;
+	robot_pose.orientation.w = odom_msg.pose.pose.orientation.w;
 
 }
 /////////////////////////////////////メイン処理/////////////////////////////////////////////////////////
@@ -98,20 +115,25 @@ int main(int argc, char** argv){
 
   ros::Subscriber sub1 = n.subscribe("GoalPoint", 100, GoalRegistCB);//ゴール地点登録用サブスクライバ
   ros::Subscriber sub2 = n.subscribe("GoToPoint", 100, Go2PointCB);//ゴール地点をアクションサーバへ送信
+  ros::Subscriber sub3 = n.subscribe("amcl_pose", 100, odomCallback);//オドメトリ情報取得用サブスクライバ
 
   ros::Rate loop_rate(10);//ノード更新周期10Hz
   //無限ループ
   while(ros::ok()){
 
-    if(goal_protect)ac.sendGoal(goal);
+    if(goal_protect)
+    {
+    ac.sendGoal(goal);
     ac.waitForResult();//アクションサーバからの実行結果待ち待機   
     if(ac.getState() == actionlib::SimpleClientGoalState::SUCCEEDED)//ゴール到着成功   
        ROS_INFO("Hooray, the base moved 1 meter forward");   
     else                                                            //ゴール到着失敗
-       ROS_INFO("The base failed to move forward 1 meter for some reason");   
-    //ros::spinOnce();
+       ROS_INFO("The base failed to move forward 1 meter for some reason"); 
+       goal_protect = false;//送信インアクティブ 
+    }
+    ros::spinOnce();
     loop_rate.sleep();//周期分待機
-    goal_protect = false;//送信インアクティブ
+
 
   }
   return 0;
